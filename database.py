@@ -12,15 +12,19 @@ load_dotenv()  # Reads .env file automatically
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://postgres:password@localhost/cyberwatch"  # fallback
+    "postgresql://postgres:password@localhost:5432/cyberwatch"  # fallback
 )
+
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is missing!")
 
 # =========================
 # SQLAlchemy Engine & Session
 # =========================
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True  # Avoid stale connections
+    pool_pre_ping=True,   # Avoid stale connections
+    connect_args={}       # Empty dict; for Postgres no special args needed
 )
 
 SessionLocal = sessionmaker(
