@@ -64,7 +64,7 @@ anyio==4.11.0
 scikit-learn==1.4.0
 scipy==1.13.1
 threadpoolctl==3.6.0
-
+numpy==1.26.4
 # =========================
 # Security / Auth
 # =========================
