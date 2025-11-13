@@ -1,3 +1,6 @@
 gfortran
 build-essential
+python3-dev
 libatlas-base-dev
+liblapack-dev
+libblas-dev
