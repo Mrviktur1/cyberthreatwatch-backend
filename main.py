@@ -1,5 +1,5 @@
 # ======================================================
-# 🚀 CyberThreatWatch Backend (with Cloudflare Access)
+# 🚀 CyberThreatWatch Backend (Async Version)
 # ======================================================
 
 import asyncio
@@ -10,13 +10,15 @@ from fastapi import FastAPI, WebSocket, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import Base, engine, SessionLocal
+from database import Base, engine, get_db
 from routers import auth, admin, status, fleet, siem
 from auth import get_current_user, require_roles
-from config import FRONTEND_ORIGIN, DEBUG
+from config import FRONTEND_ORIGIN
 from logger import logger
 from supabase_client import supabase
+from models import Subscription, RoleEnum
 
 # ======================================================
 # 🔐 Load environment variables
@@ -25,7 +27,6 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-
 if not SUPABASE_URL or not SUPABASE_KEY:
     logger.warning("⚠️ Missing Supabase credentials in environment variables")
 
@@ -47,10 +48,7 @@ app.add_middleware(CloudflareAccessMiddleware)
 # ======================================================
 # 🌐 CORS configuration
 # ======================================================
-allowed_origins = [
-    FRONTEND_ORIGIN,
-    "https://cyberthreatwatch.app",
-]
+allowed_origins = [FRONTEND_ORIGIN, "https://cyberthreatwatch.app"]
 allow_origin_regex = r"^https:\/\/([\w-]+\.)*cyberthreatwatch\.app$"
 
 app.add_middleware(
@@ -72,10 +70,22 @@ app.include_router(fleet.router)
 app.include_router(siem.router)
 
 # ======================================================
-# 🗄️ Initialize Database Tables
+# 🗄️ Initialize Database Tables (async)
 # ======================================================
-Base.metadata.create_all(bind=engine)
-logger.info("✅ Database tables initialized")
+async def init_db():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("✅ Database tables initialized")
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("🚀 Backend starting up...")
+    await init_db()
+    try:
+        _ = supabase.table("siem_logs").select("id").limit(1).execute()
+        logger.info("🔗 Supabase client ready")
+    except Exception as e:
+        logger.warning(f"Supabase ping failed: {e}")
 
 # ======================================================
 # 🧠 In-Memory WebSocket Connections
@@ -87,7 +97,6 @@ active_fleet_connections: Dict[str, List[WebSocket]] = {}
 # 🔔 Notification Helpers
 # ======================================================
 async def notify_admins(message: dict):
-    """Send real-time notifications to all connected admins."""
     disconnected = []
     for ws in list(active_admin_connections):
         try:
@@ -96,14 +105,9 @@ async def notify_admins(message: dict):
             logger.debug(f"Admin websocket send error: {e}")
             disconnected.append(ws)
     for ws in disconnected:
-        try:
-            active_admin_connections.remove(ws)
-        except ValueError:
-            pass
-
+        active_admin_connections[:] = [w for w in active_admin_connections if w not in disconnected]
 
 async def notify_fleet(fleet_id: str, message: dict):
-    """Send messages to all connected fleet users."""
     if fleet_id not in active_fleet_connections:
         return
     disconnected = []
@@ -112,22 +116,14 @@ async def notify_fleet(fleet_id: str, message: dict):
             await ws.send_json(message)
         except Exception:
             disconnected.append(ws)
-    for ws in disconnected:
-        try:
-            active_fleet_connections[fleet_id].remove(ws)
-        except ValueError:
-            pass
+    active_fleet_connections[fleet_id] = [w for w in active_fleet_connections[fleet_id] if w not in disconnected]
 
 # ======================================================
 # 🏠 Root Endpoint
 # ======================================================
 @app.get("/")
 async def root():
-    return {
-        "message": "CyberThreatWatch API is online 🚀",
-        "version": "1.1.0",
-        "cloudflare_protected": True,
-    }
+    return {"message": "CyberThreatWatch API is online 🚀", "version": "1.1.0", "cloudflare_protected": True}
 
 # ======================================================
 # ⚡ WebSocket: Real-Time Threat Alerts
@@ -142,10 +138,7 @@ async def websocket_alerts(websocket: WebSocket):
     except Exception as e:
         logger.error(f"Alert WebSocket error: {e}")
     finally:
-        try:
-            await websocket.close()
-        except Exception:
-            pass
+        await websocket.close()
 
 # ======================================================
 # 💬 WebSocket: Fleet Chat
@@ -166,12 +159,9 @@ async def websocket_fleet(websocket: WebSocket, fleet_id: str, user_email: str):
     except Exception as e:
         logger.error(f"Fleet chat error ({fleet_id}): {e}")
     finally:
-        try:
-            if websocket in active_fleet_connections.get(fleet_id, []):
-                active_fleet_connections[fleet_id].remove(websocket)
-            await websocket.close()
-        except Exception:
-            pass
+        if websocket in active_fleet_connections.get(fleet_id, []):
+            active_fleet_connections[fleet_id].remove(websocket)
+        await websocket.close()
 
 # ======================================================
 # 🧑💼 WebSocket: Admin Dashboard
@@ -187,12 +177,9 @@ async def websocket_admin(websocket: WebSocket, current_user=Depends(require_rol
     except Exception as e:
         logger.error(f"Admin WebSocket error: {e}")
     finally:
-        try:
-            if websocket in active_admin_connections:
-                active_admin_connections.remove(websocket)
-            await websocket.close()
-        except Exception:
-            pass
+        if websocket in active_admin_connections:
+            active_admin_connections.remove(websocket)
+        await websocket.close()
 
 # ======================================================
 # 🌀 Loader Progress Notifications
@@ -204,26 +191,23 @@ async def notify_loader_progress(step: str, progress: int):
             await ws.send_json({"step": step, "progress": progress})
         except Exception:
             disconnected.append(ws)
-    for ws in disconnected:
-        try:
-            status.active_loader_connections.remove(ws)
-        except ValueError:
-            pass
+    status.active_loader_connections[:] = [w for w in status.active_loader_connections if w not in disconnected]
     logger.info(f"Loader update: {step} ({progress}%)")
 
 # ======================================================
-# ⏱️ Subscription Enforcement
+# ⏱️ Subscription Enforcement (async)
 # ======================================================
-def enforce_subscription(current_user=Depends(get_current_user)):
-    from models import Subscription, RoleEnum
-    db = SessionLocal()
-    try:
-        if current_user.role in [RoleEnum.BUSINESS, RoleEnum.ENTERPRISE]:
-            sub = db.query(Subscription).filter(Subscription.user_id == current_user.id).first()
-            if not sub:
-                raise HTTPException(status_code=403, detail="Subscription required.")
-    finally:
-        db.close()
+async def enforce_subscription(
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    if current_user.role in [RoleEnum.BUSINESS, RoleEnum.ENTERPRISE]:
+        result = await db.execute(
+            Subscription.__table__.select().where(Subscription.user_id == current_user.id)
+        )
+        sub = result.fetchone()
+        if not sub:
+            raise HTTPException(status_code=403, detail="Subscription required.")
     return current_user
 
 # ======================================================
@@ -232,27 +216,3 @@ def enforce_subscription(current_user=Depends(get_current_user)):
 @app.get("/health")
 async def health_check():
     return JSONResponse({"status": "ok", "message": "Backend stable and connected ✅"})
-
-# ======================================================
-# 🚀 Startup
-# ======================================================
-@app.on_event("startup")
-async def startup_event():
-    logger.info("🚀 Backend starting up...")
-    try:
-        _ = supabase.table("siem_logs").select("id").limit(1).execute()
-        logger.info("🔗 Supabase client ready")
-    except Exception as e:
-        logger.warning(f"Supabase ping failed: {e}")
-
-# ======================================================
-# 🗺️ Developer Summary
-# ======================================================
-"""
-FEATURE SUMMARY:
-- Cloudflare Zero Trust JWT validation middleware
-- Supabase for fleet, users, and security data
-- WebSockets for real-time fleet and admin comms
-- Role-based auth and subscription enforcement
-- Deployed via Render with environment-based config
-"""

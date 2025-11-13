@@ -1,4 +1,8 @@
+# ======================================================
 # backend/models.py
+# Async-ready SQLAlchemy Models for CyberThreatWatch
+# ======================================================
+
 from sqlalchemy import (
     Column,
     Integer,
@@ -164,4 +168,4 @@ class SIEMLog(Base):
     event_type = Column(String, nullable=False)
     severity = Column(String, nullable=False)  # Low, Medium, High, Critical
     message = Column(Text, nullable=False)
-    log_metadata = Column("metadata", JSON, nullable=True)  # ✅ renamed to avoid reserved word
+    log_metadata = Column("metadata", JSON, nullable=True)  # Avoid reserved word conflict
