@@ -164,4 +164,4 @@ class SIEMLog(Base):
     event_type = Column(String, nullable=False)
     severity = Column(String, nullable=False)  # Low, Medium, High, Critical
     message = Column(Text, nullable=False)
-    metadata = Column(JSON, nullable=True)
+    log_metadata = Column("metadata", JSON, nullable=True)  # ✅ renamed to avoid reserved word
