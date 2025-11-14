@@ -1,10 +1,10 @@
 services:
-  - type: web
-    name: cyberthreatwatch-backend
-    env: python
-    buildCommand: |
-      apt-get update && xargs -a apt.txt apt-get install -y
-      pip install --upgrade pip
-      pip install -r requirements.txt
-    startCommand: "uvicorn main:app --host 0.0.0.0 --port 10000"
+  - name: cyberthreatwatch-backend
+    type: web
+    runtime: docker
+    repo: https://github.com/Mrviktur1/cyberthreatwatch-backend
     plan: free
+    region: oregon
+    envVars:
+      - key: DATABASE_URL
+        sync: false
