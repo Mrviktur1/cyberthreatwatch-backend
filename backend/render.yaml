@@ -1,0 +1,10 @@
+services:
+  - name: cyberthreatwatch-backend
+    type: web
+    env: python
+    plan: free
+    buildCommand: |
+      apt-get update && xargs -a backend/apt.txt apt-get install -y
+      pip install --upgrade pip
+      pip install -r backend/requirements.txt
+    startCommand: "uvicorn backend.main:app --host 0.0.0.0 --port 10000"

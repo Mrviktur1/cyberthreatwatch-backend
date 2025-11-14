@@ -1,0 +1,46 @@
+// src/components/AIWidget.jsx
+import { useState } from "react";
+
+export default function AIWidget() {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+
+  const sendMessage = async () => {
+    if (!input) return;
+    setMessages([...messages, { role: "user", text: input }]);
+    const question = input;
+    setInput("");
+
+    try {
+      const res = await fetch("http://localhost:8000/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      });
+      const data = await res.json();
+      setMessages((prev) => [...prev, { role: "user", text: question }, { role: "ai", text: data.answer }]);
+    } catch (err) {
+      console.error("AI request failed:", err);
+      setMessages((prev) => [...prev, { role: "ai", text: "Error: Could not fetch answer." }]);
+    }
+  };
+
+  return (
+    <div className="fixed bottom-4 right-4 w-80 bg-gray-900 text-white p-4 rounded shadow-lg z-50">
+      <div className="h-60 overflow-y-auto mb-2">
+        {messages.map((msg, i) => (
+          <div key={i} className={msg.role === "user" ? "text-right" : "text-left"}>
+            <span>{msg.text}</span>
+          </div>
+        ))}
+      </div>
+      <input
+        className="w-full p-2 rounded bg-gray-800 text-white"
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        placeholder="Ask me anything..."
+        onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+      />
+    </div>
+  );
+}
